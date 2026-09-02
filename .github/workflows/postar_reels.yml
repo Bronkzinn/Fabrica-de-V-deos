@@ -1,0 +1,43 @@
+name: Automação Chefinho Gastro - Reels
+
+on:
+  schedule:
+    # Horários em UTC (09:00, 13:00 e 18:00 no horário de Brasília)
+    - cron: '0 12 * * *'
+    - cron: '0 16 * * *'
+    - cron: '0 21 * * *'
+  workflow_dispatch: # Permite disparar o teste manualmente pelo painel do GitHub
+
+jobs:
+  publicar_post:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 1. Baixar código do repositório
+        uses: actions/checkout@v4
+
+      - name: 2. Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 3. Instalar FFmpeg e Fontes do Sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg fonts-liberation ttf-mscorefonts-installer
+          sudo fc-cache -f -v
+
+      - name: 4. Instalar dependências do Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 5. Executar Script de Publicação Direta
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          CLOUDINARY_URL: ${{ secrets.CLOUDINARY_URL }}
+          ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+        run: |
+          python rotina_diaria.py
