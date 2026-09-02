@@ -2,12 +2,10 @@ import os
 import cloudinary
 import cloudinary.uploader
 
-cloudinary.config(
-    cloud_name=os.environ.get("CLOUDINARY_CLOUD_NAME", ""),
-    api_key=os.environ.get("CLOUDINARY_API_KEY", ""),
-    api_secret=os.environ.get("CLOUDINARY_API_SECRET", ""),
-    secure=True
-)
+# A lib cloudinary lê CLOUDINARY_URL automaticamente no formato:
+# cloudinary://api_key:api_secret@cloud_name
+# Nenhuma configuração manual necessária quando a variável de ambiente está definida.
+cloudinary.config(secure=True)
 
 def hospedar_video_cloudinary(caminho_video):
     print(f"☁️ Hospedando vídeo no Cloudinary: {caminho_video}")
