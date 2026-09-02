@@ -4,3 +4,4 @@ edge-tts
 pillow
 schedule
 cloudinary
+python-dotenv

@@ -1,0 +1,19 @@
+﻿# Chaves e segredos — NUNCA subir pro GitHub
+.env
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Ambiente virtual
+.venv/
+venv/
+env/
+
+# Arquivos gerados localmente
+saida/
+temp/
+fundos/
+legenda_temp.srt
+temp_legenda.srt

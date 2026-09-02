@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()  # Carrega o .env localmente (ignorado no GitHub Actions)
 import time
 import json
 import random
