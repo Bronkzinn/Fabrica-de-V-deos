@@ -9,6 +9,16 @@ from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from baixar_fundo import buscar_e_baixar_fundo
 
+def carregar_fonte(nome_fonte, tamanho):
+    """Carrega fonte com fallback automático para compatibilidade Windows/Linux."""
+    try:
+        return ImageFont.truetype(nome_fonte, tamanho)
+    except OSError:
+        try:
+            return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", tamanho)
+        except OSError:
+            return ImageFont.load_default()
+
 # --- CONFIGURAÇÕES FIXAS DO PERFIL ---
 NOME_EXIBICAO = "Chefinho Gastro"
 ARROBA = "@chefinhogastro"
@@ -43,9 +53,9 @@ def criar_moldura_post(gancho_texto):
     img = Image.new("RGBA", (1080, 1920), (255, 255, 255, 255))
     draw = ImageDraw.Draw(img)
 
-    fonte_nome = ImageFont.truetype("arialbd.ttf", 44)
-    fonte_arroba = ImageFont.truetype("arial.ttf", 36)
-    fonte_gancho = ImageFont.truetype("arialbd.ttf", 42)
+    fonte_nome = carregar_fonte("arialbd.ttf", 44)
+    fonte_arroba = carregar_fonte("arial.ttf", 36)
+    fonte_gancho = carregar_fonte("arialbd.ttf", 42)
 
     tamanho_perfil = 130
     pos_x_perfil = 65
@@ -143,7 +153,7 @@ async def gerar_audio_e_legendas():
                 # Gera uma imagem PNG transparente com a legenda desenhada
                 img_leg = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
                 draw_leg = ImageDraw.Draw(img_leg)
-                fonte_leg = ImageFont.truetype("arialbd.ttf", 46)
+                fonte_leg = carregar_fonte("arialbd.ttf", 46)
 
                 # Quebra o texto em linhas caso seja longo
                 palavras = txt.split()
