@@ -89,8 +89,8 @@ REGRAS RÍGIDAS:
 """
     client = genai.Client(api_key=api_key)
 
-    # Modelos suportados pela API do Gemini
-    modelos_para_testar = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    # Modelos atualizados para a linha Gemini 3.5
+    modelos_para_testar = ["gemini-3.5-flash", "gemini-3.5-pro"]
 
     for model_name in modelos_para_testar:
         for tentativa in range(1, 4):
