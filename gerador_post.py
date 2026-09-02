@@ -43,9 +43,20 @@ timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 ARQ_SAIDA = os.path.join(PASTA_BASE, "saida", f"post_{timestamp}.mp4")
 
 def get_audio_duration(file_path):
-    cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path]
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        raise FileNotFoundError(f"O arquivo de áudio '{file_path}' não foi gerado corretamente.")
+
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        file_path
+    ]
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    return float(result.stdout.strip())
+    out = result.stdout.strip()
+    if not out:
+        raise ValueError(f"Falha ao ler duração do áudio via ffprobe. Saída de erro: {result.stderr}")
+    return float(out)
 
 # --- 1. MOLDURA BRANCA SUPERIOR VIA PILLOW ---
 def criar_moldura_post(gancho_texto):
@@ -117,19 +128,27 @@ subtitulos_timed = []
 
 async def gerar_audio_e_legendas():
     global subtitulos_timed
-    print("🎙️ 2. Sintetizando narração e gerando imagens de legendas...")
+    print("🎙️ 2. Sintetizando narração e gerando legendas...")
     
     texto_limpo = re.sub(r'\s+', ' ', args.texto).strip()
     communicate = edge_tts.Communicate(texto_limpo, args.voz, rate="-5%")
     submaker = edge_tts.SubMaker()
     
     os.makedirs(PASTA_TEMP, exist_ok=True)
+
+    # Garante que o arquivo anterior seja removido antes de recriar
+    if os.path.exists(ARQ_AUDIO):
+        os.remove(ARQ_AUDIO)
+
     with open(ARQ_AUDIO, "wb") as file:
         async for chunk in communicate.stream():
             if chunk["type"] == "audio":
                 file.write(chunk["data"])
             elif chunk["type"] == "WordBoundary":
                 submaker.feed(chunk)
+
+    if not os.path.exists(ARQ_AUDIO) or os.path.getsize(ARQ_AUDIO) == 0:
+        raise RuntimeError("Falha na geração do áudio via Edge-TTS.")
 
     srt_content = submaker.get_srt()
     subtitulos_timed = []
