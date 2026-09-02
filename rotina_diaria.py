@@ -1,6 +1,7 @@
 import os
 from dotenv import load_dotenv
 load_dotenv()  # Carrega o .env localmente (ignorado no GitHub Actions)
+
 import time
 import json
 import random
@@ -10,6 +11,7 @@ from datetime import datetime
 from google import genai
 from publicar_instagram import publicar_reels_instagram
 
+# Tenta carregar da variável de ambiente (GitHub Actions) ou do .env local
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 NICHOS_CULINARIA = [
@@ -27,7 +29,8 @@ NICHOS_GERAIS = [
     "dicas de produtividade e foco"
 ]
 
-PASTA_BASE = r"C:\FabricaVideos"
+# PASTA_BASE dinâmica: detecta a pasta onde o script está rodando (funciona em Windows e Linux)
+PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
 ARQ_HISTORICO_NICHOS = os.path.join(PASTA_BASE, "temp", "historico_nichos.json")
 ARQ_HISTORICO_CONTEUDO = os.path.join(PASTA_BASE, "temp", "historico_conteudo.json")
 
@@ -86,8 +89,8 @@ REGRAS RÍGIDAS:
 """
     client = genai.Client(api_key=api_key)
 
-    # Modelos atuais suportados pela API do Gemini
-    modelos_para_testar = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.5-flash"]
+    # Modelos suportados pela API do Gemini
+    modelos_para_testar = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
 
     for model_name in modelos_para_testar:
         for tentativa in range(1, 4):
@@ -114,7 +117,7 @@ REGRAS RÍGIDAS:
 
 def executar_postagem_unica():
     if not GEMINI_API_KEY:
-        print("❌ Configure sua GEMINI_API_KEY na variável de ambiente!")
+        print("❌ Configure sua GEMINI_API_KEY na variável de ambiente ou no arquivo .env!")
         return
 
     print(f"\n🚀 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Iniciando ciclo...")
@@ -131,8 +134,11 @@ def executar_postagem_unica():
     print(f"🔍 Tema Pexels: {ideia['tema']}")
     print("🎬 Renderizando Vídeo...")
 
+    # Caminho do gerador_post.py construído de forma dinâmica para funcionar no Linux/GitHub
+    script_gerador = os.path.join(PASTA_BASE, "gerador_post.py")
+
     cmd = [
-        "python", os.path.join(PASTA_BASE, "gerador_post.py"),
+        "python", script_gerador,
         "--gancho", ideia["gancho"],
         "--texto", ideia["texto"],
         "--tema", ideia["tema"]
@@ -162,13 +168,18 @@ def executar_postagem_unica():
         print(f"❌ Erro durante o processo: {e}")
 
 if __name__ == "__main__":
-    schedule.every().day.at("09:00").do(executar_postagem_unica)
-    schedule.every().day.at("13:00").do(executar_postagem_unica)
-    schedule.every().day.at("18:00").do(executar_postagem_unica)
+    # Se estiver rodando no GitHub Actions, executa apenas 1 ciclo diretamente e encerra
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        executar_postagem_unica()
+    else:
+        # Se estiver rodando localmente no seu computador, usa o agendador contínuo
+        schedule.every().day.at("09:00").do(executar_postagem_unica)
+        schedule.every().day.at("13:00").do(executar_postagem_unica)
+        schedule.every().day.at("18:00").do(executar_postagem_unica)
 
-    print("⏰ Robô ativado!")
-    executar_postagem_unica()
-    
-    while True:
-        schedule.run_pending()
-        time.sleep(30)
+        print("⏰ Robô ativado localmente!")
+        executar_postagem_unica()
+        
+        while True:
+            schedule.run_pending()
+            time.sleep(30)
