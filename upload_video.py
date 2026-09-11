@@ -10,9 +10,9 @@ import cloudinary.uploader
 cloudinary.config(secure=True)
 
 def hospedar_video_cloudinary(caminho_video):
-    print(f"☁️ Hospedando vídeo no Cloudinary: {caminho_video}")
+    print(f"[+] Hospedando video no Cloudinary: {caminho_video}")
     if not os.path.exists(caminho_video):
-        raise FileNotFoundError(f"Arquivo não encontrado: {caminho_video}")
+        raise FileNotFoundError(f"Arquivo nao encontrado: {caminho_video}")
 
     resposta = cloudinary.uploader.upload(
         caminho_video,
@@ -21,5 +21,5 @@ def hospedar_video_cloudinary(caminho_video):
     )
 
     url_video = resposta.get("secure_url")
-    print(f"🔗 URL pública gerada: {url_video}")
+    print(f"[+] URL publica gerada: {url_video}")
     return url_video

@@ -32,7 +32,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 5. Executar Script de Publicação Direta
+      - name: 5. Criar pasta de logs
+        run: mkdir -p logs
+
+      - name: 6. Executar Script de Publicação Direta
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
@@ -40,4 +43,4 @@ jobs:
           ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
           IG_USER_ID: ${{ secrets.IG_USER_ID }}
         run: |
-          python rotina_diaria.py
+          python rotina_diaria.py --run-once

@@ -7,29 +7,30 @@ import random
 # Substitua pela sua chave da API do Pexels
 PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
 
-PASTA_FUNDOS = r"C:\FabricaVideos\fundos"
+PASTA_BASE = os.path.dirname(os.path.abspath(__file__))
+PASTA_FUNDOS = os.path.join(PASTA_BASE, "fundos")
 os.makedirs(PASTA_FUNDOS, exist_ok=True)
 
 def buscar_e_baixar_fundo(termo_busca="satisfying nature"):
     if not PEXELS_API_KEY:
-        print(" Atenção: Configure sua chave PEXELS_API_KEY no arquivo.")
+        print("[X] Atencao: Configure sua chave PEXELS_API_KEY no arquivo.")
         return None
 
     headers = {"Authorization": PEXELS_API_KEY}
     url = f"https://api.pexels.com/videos/search?query={termo_busca}&orientation=portrait&per_page=15"
     
-    print(f" Buscando fundo vertical no Pexels para: '{termo_busca}'...")
+    print(f"[+] Buscando fundo vertical no Pexels para: '{termo_busca}'...")
     response = requests.get(url, headers=headers)
     
     if response.status_code != 200:
-        print(f" Erro na API do Pexels: {response.status_code} - {response.text}")
+        print(f"[X] Erro na API do Pexels: {response.status_code} - {response.text}")
         return None
         
     data = response.json()
     videos = data.get("videos", [])
     
     if not videos:
-        print(" Nenhum vídeo encontrado para o termo. Buscando tema genérico 'abstract nature'...")
+        print("[-] Nenhum video encontrado para o termo. Buscando tema generico 'abstract nature'...")
         return buscar_e_baixar_fundo("abstract nature")
 
     # Escolhe um vídeo aleatório da lista para variar os fundos
@@ -48,19 +49,19 @@ def buscar_e_baixar_fundo(termo_busca="satisfying nature"):
         link_download = video_files[0].get("link")
 
     if not link_download:
-        print(" Não foi possível encontrar link de download válido.")
+        print("[X] Nao foi possivel encontrar link de download valido.")
         return None
 
     caminho_arquivo = os.path.join(PASTA_FUNDOS, "fundo.mp4")
     
-    print("⬇ Baixando vídeo de fundo...")
+    print("[+] Baixando video de fundo...")
     r = requests.get(link_download, stream=True)
     with open(caminho_arquivo, "wb") as f:
         for chunk in r.iter_content(chunk_size=1024*1024):
             if chunk:
                 f.write(chunk)
                 
-    print(f" Fundo salvo com sucesso em: {caminho_arquivo}")
+    print(f"[+] Fundo salvo com sucesso em: {caminho_arquivo}")
     return caminho_arquivo
 
 if __name__ == "__main__":

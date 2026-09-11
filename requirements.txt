@@ -1,7 +1,10 @@
-google-genai
+google-generativeai
 requests
 edge-tts
 pillow
 schedule
 cloudinary
 python-dotenv
+fastapi
+uvicorn
+pydantic

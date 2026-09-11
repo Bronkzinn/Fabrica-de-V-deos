@@ -1,3 +1,4 @@
+import sys
 import os
 from dotenv import load_dotenv
 load_dotenv()  # Carrega o .env localmente (ignorado no GitHub Actions)
@@ -10,9 +11,15 @@ import subprocess
 from datetime import datetime
 from google import genai
 from publicar_instagram import publicar_reels_instagram
+import argparse
+import logging
 
 # Tenta carregar da variável de ambiente (GitHub Actions) ou do .env local
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGS_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOGS_DIR, exist_ok=True)
+logging.basicConfig(filename=os.path.join(LOGS_DIR, "rotina_diaria.log"), level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 NICHOS_CULINARIA = [
     "truques de culinária e receitas fáceis",
@@ -88,9 +95,12 @@ REGRAS RÍGIDAS:
 7. Sem formatação markdown extra fora do JSON.
 """
     client = genai.Client(api_key=api_key)
-
-    # Modelos atualizados para a linha Gemini 3.5
-    modelos_para_testar = ["gemini-3.5-flash", "gemini-3.5-pro"]
+    modelos_para_testar = [
+        "gemini-3.6-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-pro-preview",
+        "gemini-2.5-flash"
+    ]
 
     for model_name in modelos_para_testar:
         for tentativa in range(1, 4):
@@ -98,7 +108,9 @@ REGRAS RÍGIDAS:
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt,
-                    config={"response_mime_type": "application/json"}
+                    config={
+                        "response_mime_type": "application/json"
+                    }
                 )
                 if response and response.text:
                     dados = json.loads(response.text)
@@ -106,39 +118,39 @@ REGRAS RÍGIDAS:
                     
                     historico_conteudos.append(gancho)
                     salvar_json(ARQ_HISTORICO_CONTEUDO, historico_conteudos)
-                    print(f"✅ Roteiro inédito gerado com sucesso usando o modelo [{model_name}]!")
+                    print(f"[+] Roteiro gerado com sucesso usando [{model_name}]!")
                     return dados
             except Exception as e:
-                print(f"⚠️ Tentativa {tentativa}/3 no modelo [{model_name}] falhou: {e}")
+                print(f"[-] Tentativa {tentativa}/3 no modelo [{model_name}] falhou.")
                 time.sleep(2)
 
-    print("❌ Falha na geração do roteiro.")
+    print("[X] Falha na geração do roteiro.")
     return None
 
 def executar_postagem_unica():
     if not GEMINI_API_KEY:
-        print("❌ Configure sua GEMINI_API_KEY na variável de ambiente ou no arquivo .env!")
+        print("[X] Configure sua GEMINI_API_KEY na variável de ambiente ou no arquivo .env!")
         return
 
-    print(f"\n🚀 [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Iniciando ciclo...")
+    print(f"\n[+] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Iniciando ciclo...")
     nicho = selecionar_nicho_balanceado()
 
-    print(f"🧠 Gerando roteiro para [{nicho.upper()}]...")
+    print(f"[+] Gerando roteiro para [{nicho.upper()}]...")
     ideia = gerar_roteiro_ia(nicho, GEMINI_API_KEY)
     
     if not ideia:
-        print("⏭️ Cancelando ciclo por falta de roteiro inédito.")
+        print("[-] Cancelando ciclo por falta de roteiro inédito.")
         return
 
-    print(f"📌 Gancho: {ideia['gancho']}")
-    print(f"🔍 Tema Pexels: {ideia['tema']}")
-    print("🎬 Renderizando Vídeo...")
+    print(f"[+] Gancho: {ideia['gancho']}")
+    print(f"[+] Tema Pexels: {ideia['tema']}")
+    print("[+] Renderizando Vídeo...")
 
     # Caminho do gerador_post.py construído de forma dinâmica para funcionar no Linux/GitHub
     script_gerador = os.path.join(PASTA_BASE, "gerador_post.py")
 
     cmd = [
-        "python", script_gerador,
+        sys.executable, script_gerador,
         "--gancho", ideia["gancho"],
         "--texto", ideia["texto"],
         "--tema", ideia["tema"]
@@ -146,40 +158,49 @@ def executar_postagem_unica():
 
     try:
         subprocess.run(cmd, check=True)
-        print("✅ Vídeo renderizado com sucesso!")
+        print("[+] Vídeo renderizado com sucesso!")
         
         pasta_saida = os.path.join(PASTA_BASE, "saida")
-        arquivos_mp4 = [os.path.join(pasta_saida, f) for f in os.listdir(pasta_saida) if f.endswith(".mp4")]
+        if os.path.exists(pasta_saida):
+            arquivos_mp4 = [os.path.join(pasta_saida, f) for f in os.listdir(pasta_saida) if f.endswith(".mp4")]
+        else:
+            arquivos_mp4 = []
         
         if not arquivos_mp4:
-            print("❌ Nenhum vídeo encontrado na pasta 'saida'.")
+            print("[X] Nenhum vídeo encontrado na pasta 'saida'.")
             return
 
         caminho_video_saida = max(arquivos_mp4, key=os.path.getctime)
-        print(f"📁 Vídeo pronto em: {caminho_video_saida}")
+        print(f"[+] Vídeo pronto em: {caminho_video_saida}")
         
         legenda_completa = f"{ideia['legenda']}\n\n{ideia['hashtags']}"
         
-        print("📤 Enviando para o Instagram...")
-        publicar_reels_instagram(caminho_video_saida, legenda_completa)
-        print("🎉 Post publicado no Reels com sucesso!")
+        print("[+] Enviando para o Instagram...")
+        sucesso = publicar_reels_instagram(caminho_video_saida, legenda_completa)
+        if sucesso:
+            print("[+] Post publicado no Reels com sucesso!")
+        else:
+            raise RuntimeError("Falha na publicação no Instagram.")
         
     except Exception as e:
-        print(f"❌ Erro durante o processo: {e}")
+        print(f"[X] Erro durante o processo: {e}")
 
 if __name__ == "__main__":
-    # Se estiver rodando no GitHub Actions, executa apenas 1 ciclo diretamente e encerra
-    if os.environ.get("GITHUB_ACTIONS") == "true":
+    parser = argparse.ArgumentParser(description="Rotina de postagens automáticas")
+    parser.add_argument("--run-once", action="store_true", help="Executa apenas uma postagem e encerra.")
+    args = parser.parse_args()
+
+    if os.environ.get("GITHUB_ACTIONS") == "true" or args.run_once:
+        # Em CI ou quando o flag --run-once é usado, executa apenas uma vez e encerra com sys.exit(0).
         executar_postagem_unica()
+        sys.exit(0)
     else:
-        # Se estiver rodando localmente no seu computador, usa o agendador contínuo
+        # Agendador contínuo local
         schedule.every().day.at("09:00").do(executar_postagem_unica)
         schedule.every().day.at("13:00").do(executar_postagem_unica)
         schedule.every().day.at("18:00").do(executar_postagem_unica)
 
-        print("⏰ Robô ativado localmente!")
-        executar_postagem_unica()
-        
+        print("[+] Robô ativado localmente! Iniciando agenda de postagens.")
         while True:
             schedule.run_pending()
             time.sleep(30)
