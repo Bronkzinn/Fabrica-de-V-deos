@@ -3,7 +3,7 @@ import sys
 import shutil
 import glob
 from typing import Optional
-from fastapi import FastAPI, Header, HTTPException, Security, status
+from fastapi import FastAPI, Header, HTTPException, BackgroundTasks, status
 from pydantic import BaseModel
 from rotina_diaria import (
     GEMINI_API_KEY,
@@ -42,47 +42,28 @@ def limpar_pasta_temp():
             except Exception as e:
                 print(f"[-] Erro ao deletar {caminho}: {e}")
 
-@app.get("/")
-def health_check():
-    return {"status": "online", "message": "Fábrica de Vídeos API operando normalmente."}
-
-@app.post("/gerar-e-postar")
-def gerar_e_postar(
-    payload: Optional[PostPayload] = None,
-    x_api_key: Optional[str] = Header(None, alias="X-API-KEY")
-):
-    # Autenticação via Secret Header
-    if WEBHOOK_SECRET:
-        if not x_api_key or x_api_key != WEBHOOK_SECRET:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Cabeçalho de autenticação 'X-API-KEY' inválido ou ausente."
-            )
-
+def tarefa_gerar_e_postar(payload_dict: dict):
+    """Executa todo o pipeline pesado em segundo plano."""
     try:
-        gancho = payload.gancho if payload else None
-        texto = payload.texto if payload else None
-        tema = payload.tema if payload else None
-        legenda = payload.legenda if payload else None
-        hashtags = payload.hashtags if payload else None
-        nicho = payload.nicho if payload else None
+        gancho = payload_dict.get("gancho")
+        texto = payload_dict.get("texto")
+        tema = payload_dict.get("tema")
+        legenda = payload_dict.get("legenda")
+        hashtags = payload_dict.get("hashtags")
+        nicho = payload_dict.get("nicho")
 
         # Se o roteiro não foi fornecido via payload, gera dinamicamente via IA
         if not (gancho and texto and tema):
             if not GEMINI_API_KEY:
-                raise HTTPException(
-                    status_code=500,
-                    detail="GEMINI_API_KEY não configurada no servidor."
-                )
+                print("[X] GEMINI_API_KEY não configurada no servidor.")
+                return
             if not nicho:
                 nicho = selecionar_nicho_balanceado()
             
             roteiro_ia = gerar_roteiro_ia(nicho, GEMINI_API_KEY)
             if not roteiro_ia:
-                raise HTTPException(
-                    status_code=500,
-                    detail="Falha ao gerar roteiro via Gemini."
-                )
+                print("[X] Falha ao gerar roteiro via Gemini.")
+                return
             
             gancho = gancho or roteiro_ia["gancho"]
             texto = texto or roteiro_ia["texto"]
@@ -104,7 +85,8 @@ def gerar_e_postar(
         pasta_saida = os.path.join(PASTA_BASE, "saida")
         arquivos_mp4 = [os.path.join(pasta_saida, f) for f in os.listdir(pasta_saida) if f.endswith(".mp4")]
         if not arquivos_mp4:
-            raise FileNotFoundError("Nenhum vídeo renderizado foi encontrado na pasta 'saida'.")
+            print("[X] Nenhum vídeo renderizado foi encontrado na pasta 'saida'.")
+            return
 
         caminho_video = max(arquivos_mp4, key=os.path.getctime)
 
@@ -116,24 +98,37 @@ def gerar_e_postar(
 
         # Limpeza pós-execução
         limpar_pasta_temp()
-
-        return {
-            "sucesso": True,
-            "gancho": gancho,
-            "tema": tema,
-            "url_cloudinary": url_cloudinary,
-            "mensagem": "Vídeo renderizado e publicado no Reels com sucesso!"
-        }
+        print("[+] Tarefa em segundo plano finalizada com sucesso!")
 
     except Exception as e:
         limpar_pasta_temp()
-        return {
-            "sucesso": False,
-            "url_cloudinary": None,
-            "mensagem_erro": str(e)
-        }
+        print(f"[X] Erro na execução da tarefa em segundo plano: {e}")
 
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.environ.get("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port)
+@app.get("/")
+def health_check():
+    return {"status": "online", "message": "Fábrica de Vídeos API operando normalmente."}
+
+@app.post("/gerar-e-postar")
+def gerar_e_postar(
+    background_tasks: BackgroundTasks,
+    payload: Optional[PostPayload] = None,
+    x_api_key: Optional[str] = Header(None, alias="X-API-KEY")
+):
+    # Autenticação via Secret Header
+    if WEBHOOK_SECRET:
+        if not x_api_key or x_api_key != WEBHOOK_SECRET:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Cabeçalho de autenticação 'X-API-KEY' inválido ou ausente."
+            )
+
+    payload_dict = payload.dict() if payload else {}
+    
+    # Adiciona a tarefa pesada para rodar em segundo plano
+    background_tasks.add_task(tarefa_gerar_e_postar, payload_dict)
+
+    # Responde instantaneamente para o Make não dar timeout de 40s
+    return {
+        "sucesso": True,
+        "mensagem": "Processamento de vídeo e postagem iniciado em segundo plano com sucesso!"
+    }
