@@ -1,3 +1,4 @@
+import gc
 import os
 import sys
 import shutil
@@ -29,7 +30,7 @@ class PostPayload(BaseModel):
     nicho: Optional[str] = None
 
 def limpar_pasta_temp():
-    """Remove arquivos temporários da pasta temp/ para economizar espaço em disco."""
+    """Remove arquivos temporários da pasta temp/ para economizar espaço em disco e memória."""
     pasta_temp = os.path.join(PASTA_BASE, "temp")
     if os.path.exists(pasta_temp):
         for f in os.listdir(pasta_temp):
@@ -41,6 +42,7 @@ def limpar_pasta_temp():
                     shutil.rmtree(caminho)
             except Exception as e:
                 print(f"[-] Erro ao deletar {caminho}: {e}")
+    gc.collect()
 
 def tarefa_gerar_e_postar(payload_dict: dict):
     """Executa todo o pipeline pesado em segundo plano."""
@@ -105,6 +107,7 @@ def tarefa_gerar_e_postar(payload_dict: dict):
         print(f"[X] Erro na execução da tarefa em segundo plano: {e}")
 
 @app.get("/")
+@app.head("/")
 def health_check():
     return {"status": "online", "message": "Fábrica de Vídeos API operando normalmente."}
 
