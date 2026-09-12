@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import gc
 import argparse
 import asyncio
 import edge_tts
@@ -77,7 +78,7 @@ def get_audio_duration(file_path):
 
 # --- 1. MOLDURA BRANCA SUPERIOR VIA PILLOW ---
 def criar_moldura_post(gancho_texto):
-    print("[+] 1. Gerando moldura com proporcoes calibradas...")
+    print("[+] 1. Gerando moldura com proporçoes calibradas...")
     img = Image.new("RGBA", (1080, 1920), (255, 255, 255, 255))
     draw = ImageDraw.Draw(img)
 
@@ -90,15 +91,19 @@ def criar_moldura_post(gancho_texto):
     pos_y_perfil = 65
 
     if os.path.exists(FOTO_PERFIL):
-        perfil = Image.open(FOTO_PERFIL).convert("RGBA")
-        perfil_quadrado = ImageOps.fit(perfil, (tamanho_perfil, tamanho_perfil), method=Image.Resampling.LANCZOS)
+        with Image.open(FOTO_PERFIL) as perfil_raw:
+            perfil = perfil_raw.convert("RGBA")
+            with ImageOps.fit(perfil, (tamanho_perfil, tamanho_perfil), method=Image.Resampling.LANCZOS) as perfil_quadrado:
+                mask = Image.new("L", (tamanho_perfil * 4, tamanho_perfil * 4), 0)
+                draw_mask = ImageDraw.Draw(mask)
+                draw_mask.ellipse((0, 0, tamanho_perfil * 4, tamanho_perfil * 4), fill=255)
+                mask_resized = mask.resize((tamanho_perfil, tamanho_perfil), resample=Image.Resampling.LANCZOS)
 
-        mask = Image.new("L", (tamanho_perfil * 4, tamanho_perfil * 4), 0)
-        draw_mask = ImageDraw.Draw(mask)
-        draw_mask.ellipse((0, 0, tamanho_perfil * 4, tamanho_perfil * 4), fill=255)
-        mask = mask.resize((tamanho_perfil, tamanho_perfil), resample=Image.Resampling.LANCZOS)
-
-        img.paste(perfil_quadrado, (pos_x_perfil, pos_y_perfil), mask)
+                img.paste(perfil_quadrado, (pos_x_perfil, pos_y_perfil), mask_resized)
+                
+                mask.close()
+                mask_resized.close()
+            perfil.close()
 
     offset_texto_x = pos_x_perfil + tamanho_perfil + 25
     pos_y_nome = 80
@@ -109,14 +114,15 @@ def criar_moldura_post(gancho_texto):
 
     if os.path.exists(ICONE_VERIFICADO):
         tam_selo = 38
-        verif = Image.open(ICONE_VERIFICADO).convert("RGBA")
-        verif = verif.resize((tam_selo, tam_selo), Image.Resampling.LANCZOS)
-        
-        largura_nome = draw.textlength(NOME_EXIBICAO, font=fonte_nome)
-        pos_selo_x = int(offset_texto_x + largura_nome + 12)
-        pos_selo_y = pos_y_nome + 6
-        
-        img.paste(verif, (pos_selo_x, pos_selo_y), verif)
+        with Image.open(ICONE_VERIFICADO) as verif_raw:
+            verif = verif_raw.convert("RGBA").resize((tam_selo, tam_selo), Image.Resampling.LANCZOS)
+            
+            largura_nome = draw.textlength(NOME_EXIBICAO, font=fonte_nome)
+            pos_selo_x = int(offset_texto_x + largura_nome + 12)
+            pos_selo_y = pos_y_nome + 6
+            
+            img.paste(verif, (pos_selo_x, pos_selo_y), verif)
+            verif.close()
 
     palavras = gancho_texto.split()
     linhas = []
@@ -139,91 +145,42 @@ def criar_moldura_post(gancho_texto):
     draw.rectangle([0, 480, 1080, 1480], fill=(0, 0, 0, 0))
     os.makedirs(PASTA_TEMP, exist_ok=True)
     img.save(ARQ_MOLDURA)
+    img.close()
 
-# --- 2. ÁUDIO CADENCIADO + CRIAÇÃO DE IMAGENS DE LEGENDA (PNG OVERLAYS) ---
-subtitulos_timed = []
+    gc.collect()
 
-async def gerar_audio_e_legendas():
-    global subtitulos_timed
-    print("[+] 2. Sintetizando narracao e gerando legendas...")
+# --- 2. ÁUDIO DA NARRAÇÃO (EDGE-TTS) ---
+async def gerar_audio():
+    print("[+] 2. Sintetizando narração em áudio...")
     
     texto_limpo = re.sub(r'\s+', ' ', args.texto).strip()
     communicate = edge_tts.Communicate(texto_limpo, args.voz, rate="-5%")
-    submaker = edge_tts.SubMaker()
     
     os.makedirs(PASTA_TEMP, exist_ok=True)
 
     if os.path.exists(ARQ_AUDIO):
         os.remove(ARQ_AUDIO)
 
-    with open(ARQ_AUDIO, "wb") as file:
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                file.write(chunk["data"])
-            elif chunk["type"] == "WordBoundary":
-                submaker.feed(chunk)
+    await communicate.save(ARQ_AUDIO)
 
     if not os.path.exists(ARQ_AUDIO) or os.path.getsize(ARQ_AUDIO) == 0:
-        raise RuntimeError("Falha na geracao do audio via Edge-TTS.")
-
-    srt_content = submaker.get_srt()
-    subtitulos_timed = []
+        raise RuntimeError("Falha na geração do áudio via Edge-TTS.")
     
-    if srt_content:
-        blocks = srt_content.strip().split("\n\n")
-        idx = 0
-        for block in blocks:
-            lines = [line.strip() for line in block.split("\n") if line.strip()]
-            if len(lines) >= 3:
-                times = lines[1].split(" --> ")
-                
-                def srt_to_seconds(t_str):
-                    parts = t_str.replace(',', '.').split(':')
-                    return float(parts[0])*3600 + float(parts[1])*60 + float(parts[2])
+    gc.collect()
 
-                st = srt_to_seconds(times[0])
-                et = srt_to_seconds(times[1])
-                txt = " ".join(lines[2:]).strip().upper()
-                
-                img_leg = Image.new("RGBA", (1080, 1920), (0, 0, 0, 0))
-                draw_leg = ImageDraw.Draw(img_leg)
-                fonte_leg = carregar_fonte("arialbd.ttf", 52)
+def limpar_arquivos_temporarios():
+    """Remove arquivos intermediários para liberar espaço e memória RAM."""
+    for arq in [ARQ_AUDIO, ARQ_MOLDURA]:
+        if os.path.exists(arq):
+            try:
+                os.remove(arq)
+            except Exception as e:
+                print(f"[-] Aviso ao deletar temporário {arq}: {e}")
+    gc.collect()
 
-                palavras = txt.split()
-                linhas_leg = []
-                l_atual = ""
-                for p in palavras:
-                    teste = f"{l_atual} {p}".strip()
-                    if draw_leg.textlength(teste, font=fonte_leg) < 900:
-                        l_atual = teste
-                    else:
-                        linhas_leg.append(l_atual)
-                        l_atual = p
-                if l_atual:
-                    linhas_leg.append(l_atual)
-
-                y_center = 1150
-                for linha in linhas_leg:
-                    w = draw_leg.textlength(linha, font=fonte_leg)
-                    x = (1080 - w) / 2
-                    
-                    stroke_w = 5
-                    for dx in range(-stroke_w, stroke_w + 1):
-                        for dy in range(-stroke_w, stroke_w + 1):
-                            if dx != 0 or dy != 0:
-                                draw_leg.text((x + dx, y_center + dy), linha, fill=(0, 0, 0, 255), font=fonte_leg)
-                    
-                    draw_leg.text((x, y_center), linha, fill=(255, 255, 0, 255), font=fonte_leg)
-                    y_center += 65
-
-                caminho_png_leg = os.path.join(PASTA_TEMP, f"leg_{idx}.png")
-                img_leg.save(caminho_png_leg)
-                subtitulos_timed.append((st, et, caminho_png_leg))
-                idx += 1
-
-# --- 3. RENDERIZAÇÃO FFMPEG COM OVERLAYS DE IMAGEM POR TEMPO ---
+# --- 3. RENDERIZAÇÃO FFMPEG ---
 def renderizar_video_post():
-    print("[+] 3. Renderizando composicao final via FFmpeg Overlays...")
+    print("[+] 3. Renderizando composição final via FFmpeg (Otimizado para baixa RAM)...")
     
     arq_audio_abs = os.path.abspath(ARQ_AUDIO)
     arq_moldura_abs = os.path.abspath(ARQ_MOLDURA)
@@ -243,44 +200,35 @@ def renderizar_video_post():
 
     cmd_inputs = [
         "ffmpeg", "-y",
+        "-threads", "1",
         "-stream_loop", "-1", "-i", arq_fundo_abs,
-        "-i", arq_moldura_abs
+        "-i", arq_moldura_abs,
+        "-i", arq_audio_abs
     ]
 
-    for _, _, caminho_png in subtitulos_timed:
-        caminho_png_abs = os.path.abspath(caminho_png)
-        if os.path.exists(caminho_png_abs):
-            cmd_inputs.extend(["-i", caminho_png_abs])
-
-    cmd_inputs.extend(["-i", arq_audio_abs])
-
-    idx_audio = len(subtitulos_timed) + 2
     filter_parts = [
         f"[0:v]scale=1080:1000:force_original_aspect_ratio=increase,crop=1080:1000[vid]",
         f"color=c=white:s=1080x1920:d={duracao:.2f}[bg]",
         f"[bg][vid]overlay=0:480[c0]",
-        f"[c0][1:v]overlay=0:0[c1]"
+        f"[c0][1:v]overlay=0:0[final]"
     ]
-
-    last_label = "c1"
-    for idx, (st, et, _) in enumerate(subtitulos_timed):
-        in_idx = idx + 2
-        next_label = f"c{idx + 2}"
-        f_str = f"[{last_label}][{in_idx}:v]overlay=0:0:enable='between(t,{st:.2f},{et:.2f})'[{next_label}]"
-        filter_parts.append(f_str)
-        last_label = next_label
 
     filter_complex = ";".join(filter_parts)
 
     cmd = cmd_inputs + [
         "-t", str(duracao),
         "-filter_complex", filter_complex,
-        "-map", f"[{last_label}]",
-        "-map", f"{idx_audio}:a:0",
+        "-map", "[final]",
+        "-map", "2:a:0",
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-pix_fmt", "yuv420p",
+        "-preset", "ultrafast",
+        "-tune", "zerolatency",
+        "-max_muxing_queue_size", "1024",
+        "-bufsize", "2M",
+        "-threads", "1",
         "-c:a", "aac",
-        "-b:a", "192k",
+        "-b:a", "128k",
         arq_saida_abs
     ]
 
@@ -290,10 +238,13 @@ def renderizar_video_post():
         print(f"[X] Erro na execução do FFmpeg:\n{e.stderr}")
         raise e
 
-    print(f"\n[+] Video gerado com sucesso com legendas impressas: {ARQ_SAIDA}")
+    print(f"\n[+] Vídeo gerado com sucesso: {ARQ_SAIDA}")
 
 if __name__ == "__main__":
-    criar_moldura_post(args.gancho)
-    buscar_e_baixar_fundo(args.tema)
-    asyncio.run(gerar_audio_e_legendas())
-    renderizar_video_post()
+    try:
+        criar_moldura_post(args.gancho)
+        buscar_e_baixar_fundo(args.tema)
+        asyncio.run(gerar_audio())
+        renderizar_video_post()
+    finally:
+        limpar_arquivos_temporarios()
