@@ -22,47 +22,73 @@ def publicar_reels_instagram(caminho_video_mp4, legenda):
     validar_credenciais_instagram()
     print("[+] Iniciando processo de publicacao do Reels no Instagram...")
     
-    # Faz o upload para o Cloudinary e obtém a URL pública
-    url_video_publica = hospedar_video_cloudinary(caminho_video_mp4)
-
-    # Pausa para garantir a propagação do arquivo na CDN pública antes da Meta requisitar
-    time.sleep(8)
-
-    # ==========================================
-    # PASSO 1: Criar o contêiner de mídia (Reels)
-    # ==========================================
-    url_criacao = f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media"
+    if not os.path.exists(caminho_video_mp4):
+        raise FileNotFoundError(f"Arquivo de vídeo não encontrado: {caminho_video_mp4}")
     
-    payload = {
+    tamanho_video = os.path.getsize(caminho_video_mp4)
+    print(f"[+] Tamanho do arquivo: {tamanho_video / (1024*1024):.2f} MB")
+
+    # =========================================================================
+    # PASSO 1: Iniciar Sessão de Upload Direto (Sem depender de CDNs externas)
+    # =========================================================================
+    url_sessao = f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media"
+    payload_sessao = {
         'media_type': 'REELS',
-        'video_url': url_video_publica,
+        'upload_type': 'resumable',
         'caption': legenda,
         'access_token': ACCESS_TOKEN
     }
+
+    print("[+] Criando sessão de upload direto na Meta...")
+    res_sessao = requests.post(url_sessao, data=payload_sessao).json()
     
-    print("[+] Enviando solicitacao de criacao de conteiner...")
-    resposta = requests.post(url_criacao, data=payload)
-    resultado = resposta.json()
-    
-    if "id" not in resultado:
-        print(f"[X] Erro ao criar o conteiner no Instagram: {resultado}")
-        raise RuntimeError(f"Erro ao criar conteiner no Instagram: {resultado.get('error')}")
+    if "id" not in res_sessao or "uri" not in res_sessao:
+        print(f"[!] Resumable upload não retornou URI. Tentando método por URL via Cloudinary como fallback...")
+        url_video_publica = hospedar_video_cloudinary(caminho_video_mp4)
+        time.sleep(10)
+        res_sessao = requests.post(url_sessao, data={
+            'media_type': 'REELS',
+            'video_url': url_video_publica,
+            'caption': legenda,
+            'access_token': ACCESS_TOKEN
+        }).json()
+        if "id" not in res_sessao:
+            raise RuntimeError(f"Erro ao criar contêiner no Instagram: {res_sessao}")
+        creation_id = res_sessao["id"]
+    else:
+        creation_id = res_sessao["id"]
+        upload_uri = res_sessao["uri"]
+        print(f"[+] Sessão iniciada com sucesso! Container ID: {creation_id}")
+
+        # =========================================================================
+        # PASSO 2: Enviar os bytes do vídeo diretamente para a Meta
+        # =========================================================================
+        print("[+] Enviando bytes do vídeo diretamente para os servidores da Meta...")
+        headers_upload = {
+            'Authorization': f'OAuth {ACCESS_TOKEN}',
+            'offset': '0',
+            'file_size': str(tamanho_video),
+            'Content-Type': 'application/octet-stream'
+        }
+        with open(caminho_video_mp4, 'rb') as f_video:
+            res_upload = requests.post(upload_uri, headers=headers_upload, data=f_video)
         
-    creation_id = resultado["id"]
-    print(f"[+] Conteiner criado com sucesso! ID: {creation_id}")
-    
-    # ==========================================
-    # PASSO 2: Consultar Status de Processamento
-    # ==========================================
+        if res_upload.status_code not in [200, 201]:
+            raise RuntimeError(f"Falha no envio direto do arquivo: {res_upload.status_code} - {res_upload.text}")
+        print("[+] Envio direto de mídia concluído com sucesso!")
+
+    # =========================================================================
+    # PASSO 3: Consultar Status de Processamento
+    # =========================================================================
     url_status = f"https://graph.facebook.com/v19.0/{creation_id}"
     params_status = {
         'fields': 'status_code,status',
         'access_token': ACCESS_TOKEN
     }
 
-    print("[+] Aguardando os servidores da Meta processarem o video...")
+    print("[+] Aguardando os servidores da Meta processarem o vídeo...")
     tentativas = 0
-    max_tentativas = 30  # Timeout de até 5 minutos (30 x 10s)
+    max_tentativas = 40  # Até ~6 minutos
 
     while tentativas < max_tentativas:
         time.sleep(10)
@@ -70,34 +96,36 @@ def publicar_reels_instagram(caminho_video_mp4, legenda):
         res_status = requests.get(url_status, params=params_status).json()
         status_code = res_status.get("status_code")
 
-        print(f"[+] Verificando processamento na Meta ({tentativas * 10}s) - Status: {status_code}")
+        print(f"[+] Verificando status na Meta ({tentativas * 10}s) - Status: {status_code}")
 
         if status_code == "FINISHED":
-            print("[+] Video processado e liberado para postagem!")
+            print("[+] Vídeo 100% processado e liberado para postagem!")
             break
+        elif status_code == "IN_PROGRESS":
+            continue
         elif status_code == "ERROR":
             print(f"[X] A Meta encontrou um erro no processamento: {res_status}")
             raise RuntimeError(f"Erro no processamento da Meta: {res_status}")
 
-    # ==========================================
-    # PASSO 3: Publicar a mídia
-    # ==========================================
+    # =========================================================================
+    # PASSO 4: Publicar a mídia
+    # =========================================================================
     url_publicacao = f"https://graph.facebook.com/v19.0/{IG_USER_ID}/media_publish"
     payload_pub = {
         'creation_id': creation_id,
         'access_token': ACCESS_TOKEN
     }
     
-    print("[+] Publicando o video no perfil do Chefinho Gastro...")
+    print("[+] Publicando o vídeo no Reels do Chefinho Gastro...")
     resposta_pub = requests.post(url_publicacao, data=payload_pub)
     resultado_pub = resposta_pub.json()
     
     if "id" in resultado_pub:
-        print(f"[+] Video publicado com sucesso! Post ID: {resultado_pub['id']}")
+        print(f"[+] Vídeo publicado com sucesso! Post ID: {resultado_pub['id']}")
         return True
     else:
-        print(f"[X] Erro ao finalizar a publicacao: {resultado_pub}")
-        raise RuntimeError(f"Erro ao finalizar a publicacao: {resultado_pub.get('error')}")
+        print(f"[X] Erro ao finalizar a publicação: {resultado_pub}")
+        raise RuntimeError(f"Erro ao finalizar a publicação: {resultado_pub.get('error')}")
 
 if __name__ == "__main__":
     pasta_base = os.path.dirname(os.path.abspath(__file__))
