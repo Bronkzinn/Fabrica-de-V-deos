@@ -25,8 +25,8 @@ def publicar_reels_instagram(caminho_video_mp4, legenda):
     # Faz o upload para o Cloudinary e obtém a URL pública
     url_video_publica = hospedar_video_cloudinary(caminho_video_mp4)
 
-    # Pequena pausa para garantir a propagação do arquivo na CDN pública
-    time.sleep(3)
+    # Pausa para garantir a propagação do arquivo na CDN pública antes da Meta requisitar
+    time.sleep(8)
 
     # ==========================================
     # PASSO 1: Criar o contêiner de mídia (Reels)
