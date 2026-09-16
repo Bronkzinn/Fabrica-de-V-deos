@@ -1,5 +1,6 @@
 import sys
 import os
+import gc
 from dotenv import load_dotenv
 load_dotenv()  # Carrega o .env localmente (ignorado no GitHub Actions)
 
@@ -72,10 +73,18 @@ def selecionar_nicho_balanceado():
     salvar_json(ARQ_HISTORICO_NICHOS, historico[-9:])
     return escolhido
 
+from banco_ideias import (
+    obter_ideia_sqlite,
+    marcar_ideia_como_usada,
+    obter_historico_exclusao_sqlite
+)
+
 def gerar_roteiro_ia(nicho, api_key):
-    historico_conteudos = carregar_json(ARQ_HISTORICO_CONTEUDO)
+    historico_json = carregar_json(ARQ_HISTORICO_CONTEUDO)
+    historico_sqlite = obter_historico_exclusao_sqlite(limite=30)
     
-    ultimos_ganchos = historico_conteudos[-15:] if historico_conteudos else []
+    # Junta histórico JSON e histórico SQLite para a TRAVA RÍGIDA DE EXCLUSÃO
+    ultimos_ganchos = list(set((historico_json[-15:] if historico_json else []) + historico_sqlite))
     lista_exclusao = "\n".join([f"- {item}" for item in ultimos_ganchos])
 
     prompt = f"""
@@ -116,20 +125,41 @@ REGRAS RÍGIDAS:
                     dados = json.loads(response.text)
                     gancho = dados.get("gancho", "")
                     
-                    historico_conteudos.append(gancho)
-                    salvar_json(ARQ_HISTORICO_CONTEUDO, historico_conteudos)
-                    print(f"[+] Roteiro gerado com sucesso usando [{model_name}]!")
+                    historico_json.append(gancho)
+                    salvar_json(ARQ_HISTORICO_CONTEUDO, historico_json)
+                    print(f"[+] Roteiro gerado com sucesso usando IA [{model_name}]!")
                     return dados
             except Exception as e:
                 print(f"[-] Tentativa {tentativa}/3 no modelo [{model_name}] falhou.")
                 time.sleep(2)
 
-    print("[X] Falha na geração do roteiro.")
+    print("[!] Falha na geração via Gemini IA. Acionando 'gás' do banco de dados SQLite...")
+    ideia_sqlite = obter_ideia_sqlite()
+    if ideia_sqlite:
+        print(f"[+] Ideia resgatada do banco de dados SQLite: {ideia_sqlite['gancho']}")
+        return ideia_sqlite
+
     return None
 
+def validar_variaveis_ambiente():
+    variaveis = {
+        "GEMINI_API_KEY": os.environ.get("GEMINI_API_KEY"),
+        "PEXELS_API_KEY": os.environ.get("PEXELS_API_KEY"),
+        "CLOUDINARY_URL": os.environ.get("CLOUDINARY_URL"),
+        "ACCESS_TOKEN / META_ACCESS_TOKEN": os.environ.get("ACCESS_TOKEN") or os.environ.get("META_ACCESS_TOKEN"),
+        "IG_USER_ID": os.environ.get("IG_USER_ID")
+    }
+    ausentes = [nome for nome, val in variaveis.items() if not val]
+    if ausentes:
+        msg = f"[X] Variáveis de ambiente obrigatórias ausentes ou vazias: {', '.join(ausentes)}"
+        logging.error(msg)
+        print(msg)
+        return False
+    return True
+
 def executar_postagem_unica():
-    if not GEMINI_API_KEY:
-        print("[X] Configure sua GEMINI_API_KEY na variável de ambiente ou no arquivo .env!")
+    if not validar_variaveis_ambiente():
+        print("[-] Cancelando ciclo devido à falta de variáveis de ambiente obrigatórias.")
         return
 
     print(f"\n[+] [{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Iniciando ciclo...")
@@ -150,14 +180,14 @@ def executar_postagem_unica():
     script_gerador = os.path.join(PASTA_BASE, "gerador_post.py")
 
     cmd = [
-        sys.executable, script_gerador,
+        sys.executable, "-u", script_gerador,
         "--gancho", ideia["gancho"],
         "--texto", ideia["texto"],
         "--tema", ideia["tema"]
     ]
 
     try:
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, cwd=PASTA_BASE)
         print("[+] Vídeo renderizado com sucesso!")
         
         pasta_saida = os.path.join(PASTA_BASE, "saida")
@@ -179,11 +209,19 @@ def executar_postagem_unica():
         sucesso = publicar_reels_instagram(caminho_video_saida, legenda_completa)
         if sucesso:
             print("[+] Post publicado no Reels com sucesso!")
+            marcar_ideia_como_usada(ideia["gancho"])
+            logging.info(f"Post publicado com sucesso para nicho/gancho: {ideia['gancho']}")
         else:
             raise RuntimeError("Falha na publicação no Instagram.")
         
     except Exception as e:
-        print(f"[X] Erro durante o processo: {e}")
+        msg_erro = f"[X] Erro durante o processo: {e}"
+        print(msg_erro)
+        logging.exception("Exceção capturada na execução da rotina diária:")
+        if os.environ.get("GITHUB_ACTIONS") == "true":
+            raise e
+    finally:
+        gc.collect()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Rotina de postagens automáticas")

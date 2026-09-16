@@ -8,14 +8,25 @@ from upload_video import hospedar_video_cloudinary
 # ==========================================
 # CONFIGURAÇÕES DO INSTAGRAM / META
 # ==========================================
-ACCESS_TOKEN = os.environ.get("ACCESS_TOKEN", "")
-IG_USER_ID = os.environ.get("IG_USER_ID", "")
+# Suporta tanto ACCESS_TOKEN quanto META_ACCESS_TOKEN
+ACCESS_TOKEN = (os.environ.get("ACCESS_TOKEN") or os.environ.get("META_ACCESS_TOKEN", "")).strip()
+IG_USER_ID = os.environ.get("IG_USER_ID", "").strip()
+
+def validar_credenciais_instagram():
+    if not ACCESS_TOKEN:
+        raise ValueError("[X] Variável de ambiente ACCESS_TOKEN ou META_ACCESS_TOKEN não foi configurada!")
+    if not IG_USER_ID:
+        raise ValueError("[X] Variável de ambiente IG_USER_ID não foi configurada!")
 
 def publicar_reels_instagram(caminho_video_mp4, legenda):
+    validar_credenciais_instagram()
     print("[+] Iniciando processo de publicacao do Reels no Instagram...")
     
     # Faz o upload para o Cloudinary e obtém a URL pública
     url_video_publica = hospedar_video_cloudinary(caminho_video_mp4)
+
+    # Pequena pausa para garantir a propagação do arquivo na CDN pública
+    time.sleep(3)
 
     # ==========================================
     # PASSO 1: Criar o contêiner de mídia (Reels)
@@ -45,7 +56,7 @@ def publicar_reels_instagram(caminho_video_mp4, legenda):
     # ==========================================
     url_status = f"https://graph.facebook.com/v19.0/{creation_id}"
     params_status = {
-        'fields': 'status_code',
+        'fields': 'status_code,status',
         'access_token': ACCESS_TOKEN
     }
 
