@@ -8,6 +8,22 @@ DB_PATH = os.path.join(PASTA_BASE, "banco_ideias.db")
 def conectar_banco():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS ideias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        categoria TEXT NOT NULL,
+        gancho TEXT NOT NULL UNIQUE,
+        texto TEXT NOT NULL,
+        tema TEXT NOT NULL,
+        legenda TEXT NOT NULL,
+        hashtags TEXT NOT NULL,
+        criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        usado_em TIMESTAMP,
+        vezes_usado INTEGER DEFAULT 0
+    )
+    """)
+    conn.commit()
     return conn
 
 def obter_ideia_sqlite(categoria=None):
